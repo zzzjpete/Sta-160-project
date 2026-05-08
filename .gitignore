@@ -1,0 +1,17 @@
+# R session artifacts
+.RData
+.Rhistory
+.Rproj.user/
+
+# Rendered outputs (regenerate from .Rmd)
+*.pdf
+*.html
+*.docx
+*.tex
+*.log
+
+# Keep .rds model/data files? Remove lines below to track them
+# *.rds
+
+# OS
+.DS_Store

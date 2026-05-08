@@ -1,0 +1,980 @@
+---
+title: "scratch 2"
+output:
+  word_document: default
+  html_document: default
+  pdf_document:
+    latex_engine: xelatex
+date: "2025-05-29"
+---
+
+# Introduction
+
+```{r}
+train <- read.csv("C:/Users/Jinxi Zhang/Desktop/project/training_data.csv", stringsAsFactors=FALSE)
+test  <- read.csv("C:/Users/Jinxi Zhang/Desktop/project/test_data.csv",  stringsAsFactors=FALSE)
+
+dim(train)  # 1120 × 11
+dim(test)   #  280 × 10
+
+sapply(train, function(x) sum(is.na(x)))
+
+# Check ranges
+summary(train$Age)                              # look for negative/odd ages
+
+```
+
+```{r}
+# 查看训练集变量类型和整体情况
+str(train)
+summary(train)
+
+# 同理查看测试集
+str(test)
+summary(test)
+
+# 没有缺失值
+sapply(train, function(col) sum(is.na(col)))
+sapply(test,  function(col) sum(is.na(col)))
+
+```
+
+# EDA
+
+```{r}
+## univariate：Credit.amount, Duration, Age
+## 数值型变量的直方图和线箱图
+library(ggplot2)
+
+# Histogram of Credit.amount
+ggplot(train, aes(Credit.amount)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "white") +
+  theme_minimal() +
+  labs(title = "Distribution of Loan Amounts", x = "Credit Amount", y = "Count")
+
+# Boxplot of CreditAmount by Risk
+ggplot(train, aes(x = Risk, y = Credit.amount, fill = Risk)) +
+  geom_boxplot(alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Loan Amounts by Risk Category", x = "Risk", y = "Credit Amount")
+
+              
+# Histogram of Duration
+ggplot(train, aes(x = Duration)) +
+  geom_histogram(bins = 30, fill = "seagreen", color = "white") +
+  theme_minimal() +
+  labs(title = "训练集：Duration（月数）分布", x = "Duration", y = "Count")
+
+# Boxplot of Duration
+ggplot(train, aes(x = "", y = Duration)) +
+  geom_boxplot(fill = "lightgoldenrod") +
+  theme_minimal() +
+  labs(title = "训练集：Duration 箱线图", y = "Duration", x = "")
+
+# Age
+ggplot(train, aes(x = Age)) +
+  geom_histogram(bins = 30, fill = "orchid", color = "white") +
+  theme_minimal() +
+  labs(title = "训练集：Age 分布", x = "Age", y = "Count")
+
+ggplot(train, aes(x = "", y = Age)) +
+  geom_boxplot(fill = "slateblue") +
+  theme_minimal() +
+  labs(title = "训练集：Age 箱线图", y = "Age", x = "")
+
+```
+
+```{r}
+## 分类变量的条形图
+# Sex（性别）
+ggplot(train, aes(x = Sex)) +
+  geom_bar(fill = "steelblue") +
+  theme_minimal() +
+  labs(title = "训练集：Sex 各类别频次", x = "Sex", y = "Count")
+
+# Housing（住房状况）
+ggplot(train, aes(x = Housing)) +
+  geom_bar(fill = "seagreen") +
+  theme_minimal() +
+  labs(title = "训练集：Housing 各类别频次", x = "Housing", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Saving.accounts（储蓄账户）
+ggplot(train, aes(x = Saving.accounts)) +
+  geom_bar(fill = "orchid") +
+  theme_minimal() +
+  labs(title = "训练集：Saving.accounts 各类别频次", x = "Saving.accounts", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Checking.account（支票账户）
+ggplot(train, aes(x = Checking.account)) +
+  geom_bar(fill = "lightcoral") +
+  theme_minimal() +
+  labs(title = "训练集：Checking.account 各类别频次", x = "Checking.account", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Purpose（贷款用途）
+ggplot(train, aes(x = Purpose)) +
+  geom_bar(fill = "lightgoldenrod") +
+  theme_minimal() +
+  labs(title = "训练集：Purpose 各类别频次", x = "Purpose", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r}
+## 目标变量（Risk）的分布
+# 训练集中好/坏占比
+table(train$Risk)
+prop.table(table(train$Risk))
+
+ggplot(train, aes(x = Risk)) +
+  geom_bar(fill = "steelblue") +
+  theme_minimal() +
+  labs(title = "训练集：Risk（好/坏）分布", x = "Risk", y = "Count")
+
+```
+
+```{r}
+# 下载 kaggle_sample_solution_file.csv，并且在当前目录
+true_labels <- read.csv("C:/Users/Jinxi Zhang/Desktop/project/kaggle_sample_solution_file.csv", stringsAsFactors = FALSE)
+
+# 提取 test_raw 中对应的那 72 条
+public_test <- test[test$ID %in% true_labels$ID, ]
+# 把 Risk 合并进去
+public_test <- merge(public_test, true_labels, by = "ID", all.x = TRUE)
+# public_test$Risk 就是训练集里面的 Risk 变量含义一样
+
+```
+
+```{r}
+# 在训练集和 public_test 都生成 LogCreditAmt、LogDuration
+train$LogCreditAmt <- log1p(train$Credit.amount)
+public_test$LogCreditAmt <- log1p(public_test$Credit.amount)
+
+train$LogDuration <- log1p(train$Duration)
+public_test$LogDuration <- log1p(public_test$Duration)
+
+# 画叠加的直方图：训练集 vs 公共测试集
+ggplot() +
+  geom_histogram(data = train, aes(x = LogCreditAmt, y = ..density..),
+                 bins = 30, fill = "steelblue", alpha = 0.5) +
+  geom_histogram(data = public_test, aes(x = LogCreditAmt, y = ..density..),
+                 bins = 30, fill = "firebrick", alpha = 0.5) +
+  theme_minimal() +
+  labs(title = "LogCreditAmt 分布对比：训练集（蓝） vs 公共测试集（红）",
+       x = "LogCreditAmt", y = "Density")
+
+```
+
+```{r}
+# 对 train_raw 和 public_test 都把空字符串当 NA，并且补 "unknown"
+for (df in list(train, public_test)) {
+  df$Purpose[df$Purpose == ""] <- NA
+  df$Purpose[is.na(df$Purpose)] <- "unknown"
+}
+# 把两个数据框的 Purpose 都转成 factor，并指定同样的 levels
+train$Purpose <- factor(train$Purpose)
+public_test$Purpose <- factor(public_test$Purpose, levels = levels(train$Purpose))
+
+# side-by-side bar plot
+library(dplyr)
+freq_train <- train %>% count(Purpose)   %>% mutate(Source = "Train")
+freq_test  <- public_test %>% count(Purpose) %>% mutate(Source = "PublicTest")
+freq_all   <- bind_rows(freq_train, freq_test)
+
+ggplot(freq_all, aes(x = Purpose, y = n, fill = Source)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  theme_minimal() +
+  labs(title = "Purpose 类别频次对比：训练集 vs 公共测试集",
+       x = "Purpose", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r}
+## bivariate(risk)
+# class balance
+library(ggplot2)
+
+# Numeric vs. Risk: Age, Duration, Credit.amount
+for (v in c("Age", "Duration", "Credit.amount")) {
+  p <- ggplot(train, aes_string(x = "Risk", y = v, fill = "Risk")) +
+    geom_boxplot(alpha = 0.7) +
+    theme_minimal() +
+    labs(title = paste(v, "by Risk"), x = "Risk", y = v)
+  print(p)
+  
+  # t-test to check if means differ significantly
+  tt <- t.test(as.formula(paste(v, "~ Risk")), data = train)
+  print(tt)
+}
+
+# 3. Categorical vs. Risk: Sex, Job, Housing, Saving.accounts, Checking.account, Purpose
+for (v in c("Sex", "Job", "Housing", "Saving.accounts", "Checking.account", "Purpose")) {
+  tbl <- table(train[[v]], train$Risk, useNA = "ifany")
+  cat("\n\nVariable:", v, "\n")
+  print(tbl)
+  
+  # Use χ² when all expected counts ≥ 5; otherwise Fisher’s exact
+  chi <- chisq.test(tbl)
+  if (all(chi$expected >= 5)) {
+    print(chi)
+  } else {
+    print(fisher.test(tbl))
+  }
+}
+```
+
+# 把所有空字符串 "" 都视为空值 NA
+
+```{r}
+# 定义一个辅助函数：把 "" 或只有空格的都换成 NA
+library(tidyverse)
+blank_to_na <- function(x) {
+  if (is.character(x)) {
+    x <- ifelse(str_trim(x) == "" | str_to_lower(str_trim(x)) == "na", NA, x)
+  }
+  return(x)
+}
+
+# 对 train 和 test 的所有 character 列都应用该函数
+train <- train %>%
+  mutate(across(where(is.character), blank_to_na))
+
+test <- test %>%
+  mutate(across(where(is.character), blank_to_na))
+
+```
+
+# 2.2 将关键分类字段的 NA 填成 "unknown"
+
+```{r}
+# 先确认这两列有哪些 NA
+sum(is.na(train$Saving.accounts))     # 训练集有多少 NA
+sum(is.na(train$Checking.account))    # 训练集有多少 NA
+
+# 把 NA 替换为 "unknown"
+train <- train %>%
+  mutate(
+    Saving.accounts   = replace_na(Saving.accounts, "unknown"),
+    Checking.account  = replace_na(Checking.account,  "unknown")
+  )
+
+test <- test %>%
+  mutate(
+    Saving.accounts   = replace_na(Saving.accounts, "unknown"),
+    Checking.account  = replace_na(Checking.account,  "unknown")
+  )
+
+```
+
+# 3.检测并处理极端值（Outliers）
+
+```{r}
+## Credit.amount
+# 3.1 计算 IQR 和上下限
+quantiles_amt <- quantile(train$Credit.amount, probs = c(0.25, 0.75), na.rm = TRUE)
+Q1_amt <- quantiles_amt[1]
+Q3_amt <- quantiles_amt[2]
+IQR_amt <- Q3_amt - Q1_amt
+
+upper_bound_amt <- Q3_amt + 3 * IQR_amt   # 上限
+lower_bound_amt <- Q1_amt - 3 * IQR_amt   # 下限（通常为负，可忽略或设为 0）
+
+upper_bound_amt
+lower_bound_amt
+
+# 3.2 在训练集中做截尾：大于上限的全部设成上限
+train<- train %>%
+  mutate(
+    Credit.amount = ifelse(Credit.amount > upper_bound_amt, upper_bound_amt, Credit.amount),
+    Credit.amount = ifelse(Credit.amount < lower_bound_amt, lower_bound_amt, Credit.amount)
+  )
+
+# 3.3 同样在测试集
+test <- test %>%
+  mutate(
+    Credit.amount = ifelse(Credit.amount > upper_bound_amt, upper_bound_amt, Credit.amount),
+    Credit.amount = ifelse(Credit.amount < lower_bound_amt, lower_bound_amt, Credit.amount)
+  )
+
+## Duration
+quantiles_dur <- quantile(train$Duration, probs = c(0.25, 0.75), na.rm = TRUE)
+Q1_dur <- quantiles_dur[1]
+Q3_dur <- quantiles_dur[2]
+IQR_dur <- Q3_dur - Q1_dur
+
+upper_bound_dur <- Q3_dur + 3 * IQR_dur
+lower_bound_dur <- Q1_dur - 3 * IQR_dur
+
+train <- train %>%
+  mutate(
+    Duration = ifelse(Duration > upper_bound_dur, upper_bound_dur, Duration),
+    Duration = ifelse(Duration < lower_bound_dur, lower_bound_dur, Duration)
+  )
+
+test <- test %>%
+  mutate(
+    Duration = ifelse(Duration > upper_bound_dur, upper_bound_dur, Duration),
+    Duration = ifelse(Duration < lower_bound_dur, lower_bound_dur, Duration)
+  )
+
+upper_bound_dur
+lower_bound_dur
+
+## Age
+age_quants <- quantile(train$Age, probs = c(0.25, 0.75), na.rm = TRUE)
+Q1_age <- age_quants[1]
+Q3_age <- age_quants[2]
+IQR_age <- Q3_age - Q1_age
+
+upper_bound_age <- Q3_age + 3 * IQR_age
+lower_bound_age <- Q1_age - 3 * IQR_age
+
+train <- train %>%
+  mutate(
+    Age = ifelse(Age > upper_bound_age, upper_bound_age, Age),
+    Age = ifelse(Age < lower_bound_age, lower_bound_age, Age)
+  )
+
+test <- test %>%
+  mutate(
+    Age = ifelse(Age > upper_bound_age, upper_bound_age, Age),
+    Age = ifelse(Age < lower_bound_age, lower_bound_age, Age)
+  )
+
+upper_bound_age
+lower_bound_age
+```
+
+# 4. 合并稀少类别（Rare Category）并统一因子水平
+
+```{r}
+## Purpose
+# 4.1 查看每个 Purpose 的频次
+purpose_counts <- train %>%
+  count(Purpose) %>%
+  arrange(n)
+purpose_counts
+
+# 4.2 把频次小于阈值（例如 < 20） 的类别统一标成 "other"
+rare_purposes <- purpose_counts %>% filter(n < 20) %>% pull(Purpose)
+
+train <- train %>%
+  mutate(
+    Purpose = ifelse(Purpose %in% rare_purposes, "other", Purpose)
+  )
+
+test <- test %>%
+  mutate(
+    Purpose = ifelse(Purpose %in% rare_purposes, "other", Purpose)
+  )
+
+# 4.3 把 Purpose 转成 factor，并且显式指定 levels（训练集里所有出现过的 + "other"）
+train$Purpose <- factor(train$Purpose)
+# 先把训练集 levels 记下来
+purpose_levels <- levels(train$Purpose)
+
+# 测试集也按照相同 levels 转因子
+test$Purpose <- factor(test$Purpose, levels = purpose_levels)
+# 如果测试集中出现一些训练集没有的类别，会自动成 NA；可把它们也视作 "other"
+test$Purpose <- fct_explicit_na(test$Purpose, na_level = "other")
+
+```
+
+```{r}
+train$Sex <- factor(train$Sex)
+test$Sex  <- factor(test$Sex, levels = levels(train$Sex))
+test$Sex  <- fct_explicit_na(test$Sex, na_level = "unknown")
+
+```
+
+# 衍生特征：生成 LoanRiskScore
+
+```{r}
+# 4.5.1 先为训练集创建所有衍生特征
+train <- train %>%
+  mutate(
+    # 基础衍生特征
+    CreditPerMonth = Credit.amount / Duration,
+    
+    # 年龄分组
+    AgeGroup = cut(Age, 
+                   breaks = c(0, 25, 35, 50, 100), 
+                   labels = c("young", "middle", "senior", "old"),
+                   include.lowest = TRUE),
+    
+    # 贷款金额分组（基于训练集的分位数）
+    CreditGroup = cut(Credit.amount, 
+                      breaks = quantile(Credit.amount, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE),
+                      labels = c("low", "medium", "high", "very_high"),
+                      include.lowest = TRUE),
+    
+    # 贷款期限分组
+    DurationGroup = cut(Duration,
+                        breaks = c(0, 12, 24, 36, 100),
+                        labels = c("short", "medium", "long", "very_long"),
+                        include.lowest = TRUE),
+    
+    # 复合风险指标
+    HighRiskProfile = as.numeric(
+      Duration > 36 & 
+      Checking.account %in% c("unknown", "little") &
+      Saving.accounts %in% c("unknown", "little")
+    ),
+    
+    # 账户健康度评分
+    AccountHealth = case_when(
+      Checking.account == "rich" & Saving.accounts == "rich" ~ 4,
+      Checking.account == "moderate" & Saving.accounts %in% c("moderate", "quite rich", "rich") ~ 3,
+      Checking.account == "little" | Saving.accounts == "little" ~ 2,
+      TRUE ~ 1
+    )
+  )
+
+# 4.5.2 保存训练集的分位数，用于测试集
+train_credit_breaks <- quantile(train$Credit.amount, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+
+# 4.5.3 为测试集创建相同的衍生特征
+test <- test %>%
+  mutate(
+    # 基础衍生特征
+    CreditPerMonth = Credit.amount / Duration,
+    
+    # 年龄分组（使用相同的切分点）
+    AgeGroup = cut(Age, 
+                   breaks = c(0, 25, 35, 50, 100), 
+                   labels = c("young", "middle", "senior", "old"),
+                   include.lowest = TRUE),
+    
+    # 贷款金额分组（使用训练集的分位数！）
+    CreditGroup = cut(Credit.amount, 
+                      breaks = train_credit_breaks,
+                      labels = c("low", "medium", "high", "very_high"),
+                      include.lowest = TRUE),
+    
+    # 贷款期限分组
+    DurationGroup = cut(Duration,
+                        breaks = c(0, 12, 24, 36, 100),
+                        labels = c("short", "medium", "long", "very_long"),
+                        include.lowest = TRUE),
+    
+    # 复合风险指标
+    HighRiskProfile = as.numeric(
+      Duration > 36 & 
+      Checking.account %in% c("unknown", "little") &
+      Saving.accounts %in% c("unknown", "little")
+    ),
+    
+    # 账户健康度评分
+    AccountHealth = case_when(
+      Checking.account == "rich" & Saving.accounts == "rich" ~ 4,
+      Checking.account == "moderate" & Saving.accounts %in% c("moderate", "quite rich", "rich") ~ 3,
+      Checking.account == "little" | Saving.accounts == "little" ~ 2,
+      TRUE ~ 1
+    )
+  )
+
+```
+
+# Normalization
+
+```{r}
+# ============ 替换原来的第5步 ============
+# 5. 稳健的标准化处理
+
+# 5.1 定义稳健缩放函数
+robust_scale <- function(x) {
+  median_x <- median(x, na.rm = TRUE)
+  iqr_x <- IQR(x, na.rm = TRUE)
+  if (iqr_x == 0) {
+    # 如果IQR为0，使用标准差
+    return((x - median_x) / sd(x, na.rm = TRUE))
+  }
+  return((x - median_x) / iqr_x)
+}
+
+# 5.2 对训练集应用稳健缩放
+train <- train %>%
+  mutate(
+    # 先计算原始值的log变换
+    LogCreditAmt = log1p(Credit.amount),
+    LogDuration = log1p(Duration),
+    LogCreditPerMonth = log1p(CreditPerMonth)  # 新特征
+  )
+
+# 5.3 记录训练集的稳健统计量
+robust_params <- train %>%
+  summarise(
+    median_log_amt = median(LogCreditAmt, na.rm = TRUE),
+    iqr_log_amt = IQR(LogCreditAmt, na.rm = TRUE),
+    median_log_dur = median(LogDuration, na.rm = TRUE),
+    iqr_log_dur = IQR(LogDuration, na.rm = TRUE),
+    median_age = median(Age, na.rm = TRUE),
+    iqr_age = IQR(Age, na.rm = TRUE),
+    median_log_cpm = median(LogCreditPerMonth, na.rm = TRUE),
+    iqr_log_cpm = IQR(LogCreditPerMonth, na.rm = TRUE)
+  )
+
+# 5.4 应用稳健缩放
+train <- train %>%
+  mutate(
+    LogCreditAmt = (LogCreditAmt - robust_params$median_log_amt) / robust_params$iqr_log_amt,
+    LogDuration = (LogDuration - robust_params$median_log_dur) / robust_params$iqr_log_dur,
+    Age = (Age - robust_params$median_age) / robust_params$iqr_age,
+    LogCreditPerMonth = (LogCreditPerMonth - robust_params$median_log_cpm) / robust_params$iqr_log_cpm
+    # 移除 CreditPerMonth_scaled，如果不需要的话
+  )
+
+# 5.5 对测试集应用相同的变换（使用训练集的参数）
+test <- test %>%
+  mutate(
+    LogCreditAmt = log1p(Credit.amount),
+    LogDuration = log1p(Duration),
+    LogCreditPerMonth = log1p(CreditPerMonth)
+  ) %>%
+  mutate(
+    LogCreditAmt = (LogCreditAmt - robust_params$median_log_amt) / robust_params$iqr_log_amt,
+    LogDuration = (LogDuration - robust_params$median_log_dur) / robust_params$iqr_log_dur,
+    Age = (Age - robust_params$median_age) / robust_params$iqr_age,
+    LogCreditPerMonth = (LogCreditPerMonth - robust_params$median_log_cpm) / robust_params$iqr_log_cpm
+    # 移除 CreditPerMonth_scaled
+  )
+```
+
+# 整理打包
+
+```{r}
+train_cleaned <- train %>%
+  select(
+    ID,
+    # 标准化后的数值特征
+    LogCreditAmt, LogDuration, Age, LogCreditPerMonth,  # 移除了 CreditPerMonth_scaled
+    # 原始分类特征
+    Sex, Job, Housing, Saving.accounts, Checking.account, Purpose,
+    # 新的分类特征
+    AgeGroup, CreditGroup, DurationGroup,
+    # 新的数值特征（未标准化的）
+    HighRiskProfile, AccountHealth,
+    # 目标变量
+    Risk
+  )
+
+test_cleaned <- test %>%
+  select(
+    ID,
+    LogCreditAmt, LogDuration, Age, LogCreditPerMonth,  # 移除了 CreditPerMonth_scaled
+    Sex, Job, Housing, Saving.accounts, Checking.account, Purpose,
+    AgeGroup, CreditGroup, DurationGroup,
+    HighRiskProfile, AccountHealth
+  )
+```
+
+# 对齐 dummy 列：保证训练集与测试集特征空间完全一致
+
+```{r}
+library(fastDummies)
+
+# 8.1 训练集dummy编码
+train_dummy <- fastDummies::dummy_cols(
+  train_cleaned,
+  select_columns = c("Sex", "Job", "Housing", "Saving.accounts", 
+                     "Checking.account", "Purpose", "AgeGroup", 
+                     "CreditGroup", "DurationGroup"),  # 注意添加新的分类变量
+  remove_first_dummy = TRUE,
+  remove_selected_columns = TRUE
+)
+
+# 确保保留ID
+if (!("ID" %in% names(train_dummy))) {
+  stop("train_dummy 中没有 ID")
+}
+
+# 得到模型特征列表
+train_dummy_cols <- names(train_dummy)
+model_features <- setdiff(train_dummy_cols, c("ID", "Risk"))
+
+# 8.2 测试集dummy编码
+test_dummy <- fastDummies::dummy_cols(
+  test_cleaned,
+  select_columns = c("Sex", "Job", "Housing", "Saving.accounts", 
+                     "Checking.account", "Purpose", "AgeGroup", 
+                     "CreditGroup", "DurationGroup"),
+  remove_first_dummy = TRUE,
+  remove_selected_columns = TRUE
+)
+
+# 8.3 补齐测试集缺失的列
+test_dummy_cols <- names(test_dummy)
+missing_cols <- setdiff(model_features, test_dummy_cols)
+for (colname in missing_cols) {
+  test_dummy[[colname]] <- 0L
+}
+
+# 8.4 删除测试集多余的列
+extra_cols <- setdiff(test_dummy_cols, c("ID", model_features))
+if (length(extra_cols) > 0) {
+  test_dummy <- test_dummy %>% select(-all_of(extra_cols))
+}
+
+# 8.5 按照统一顺序排列
+test_dummy <- test_dummy %>%
+  select(ID, all_of(model_features))
+
+# 打印前几行，确认 ID 在第一列，后面是所有特征
+head(test_dummy)
+
+```
+
+```{r}
+# 训练集特征列
+final_train_feats <- names(train_dummy)[names(train_dummy) != "Risk"]
+final_test_feats  <- names(test_dummy)
+identical(final_train_feats, final_test_feats)   # 应该返回 TRUE
+
+```
+
+# 简单对比数值分布：确认标准化无误
+
+```{r}
+summary(select(train_dummy, LogCreditAmt, LogDuration, Age, LogCreditPerMonth))
+summary(select(test_dummy,  LogCreditAmt, LogDuration, Age, LogCreditPerMonth))
+```
+
+# 特征 
+
+```{r}
+# 在 train_final 里看一次这种组合下的坏账率
+prop.table(table(train_dummy$HighRiskProfile, train_dummy$Risk), margin = 1)
+prop.table(table(train_dummy$AccountHealth, train_dummy$Risk), margin = 1)
+
+
+# 验证数据处理是否正确
+# 1. 确认列对齐
+cat("训练集列数:", ncol(train_dummy), "\n")
+cat("测试集列数:", ncol(test_dummy), "\n")
+cat("特征是否对齐:", identical(names(train_dummy)[-ncol(train_dummy)], names(test_dummy)), "\n")
+
+# 2. 检查新特征的分布
+cat("\n=== 新特征分布 ===\n")
+cat("HighRiskProfile 分布:\n")
+table(train_dummy$HighRiskProfile)
+
+cat("\nAccountHealth 分布:\n")
+table(train_dummy$AccountHealth)
+
+# 3. 检查是否有缺失值
+cat("\n=== 缺失值检查 ===\n")
+cat("训练集缺失值:", sum(is.na(train_dummy)), "\n")
+cat("测试集缺失值:", sum(is.na(test_dummy)), "\n")
+```
+
+# 模型训练与验证
+
+```{r}
+library(dplyr)
+library(caret)
+library(glmnet)
+library(pROC)
+library(ranger)
+library(xgboost)
+
+# 2. 把 Risk 转成因子，且 “[bad]” 作为正类
+train_dummy$Risk <- factor(train_dummy$Risk, levels = c("good","bad"))
+
+# 3. 去掉 ID 列，仅保留模型输入与标签
+X <- train_dummy %>% select(-ID, -Risk)
+y <- train_dummy$Risk
+
+
+
+##### 1.2 分层抽样：80% 训练、20% 本地验证
+set.seed(123)  # 保证可复现
+train_idx <- createDataPartition(y, p = 0.8, list = FALSE)
+X_train    <- X[train_idx, ]
+y_train    <- y[train_idx]
+X_valid    <- X[-train_idx, ]
+y_valid    <- y[-train_idx]
+
+# 检查比例：训练集 vs 验证集，各有多少 bad/good
+prop.table(table(y_train))
+prop.table(table(y_valid))
+
+
+
+# 9.2 定义改进的交叉验证策略
+cv_ctrl <- trainControl(
+  method = "repeatedcv", 
+  number = 5,
+  repeats = 3,
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE,
+  savePredictions = "final",
+  verboseIter = FALSE
+)
+```
+
+# —— 模型一：ElasticNet Logistic Regression ——
+
+```{R}
+tmp <- train(
+  x = X_train, y = y_train,
+  method = "glmnet",
+  family = "binomial",
+  trControl = trainControl(method = "none"),
+  tuneGrid = expand.grid(alpha = 0, lambda = 0)
+)
+lambda_seq <- tmp$finalModel$lambda
+
+glmnet_grid <- expand.grid(
+  alpha = c(0, 0.5, 1),
+  lambda = lambda_seq[c(10, 50, 100, length(lambda_seq))]
+)
+
+set.seed(123)
+lr_model_v2 <- train(
+  x = X_train, 
+  y = y_train,
+  method = "glmnet",
+  family = "binomial",
+  metric = "ROC",
+  tuneGrid = glmnet_grid,
+  trControl = cv_ctrl
+)
+print(lr_model_v2$bestTune)
+cat("ElasticNet CV AUC:", max(lr_model_v2$results$ROC), "\n")
+```
+
+# —— 模型二：随机森林 (ranger) ——
+
+```{r}
+rf_grid <- expand.grid(
+  mtry = c(3, 5, 7),  # 减少特征数
+  splitrule = "gini",
+  min.node.size = c(20, 30, 50)  # 增加最小节点大小
+)
+
+set.seed(123)
+rf_model_v2 <- train(
+  x = X_train, 
+  y = y_train,
+  method = "ranger",
+  metric = "ROC",
+  tuneGrid = rf_grid,  # 使用新的参数网格
+  trControl = cv_ctrl,
+  num.trees = 500,
+  importance = "impurity"
+)
+
+# 查看最佳参数和CV分数
+print(rf_model_v2$bestTune)
+cat("Random Forest CV AUC:", max(rf_model_v2$results$ROC), "\n")
+
+```
+
+# —— 模型三：XGBoost ——
+
+```{r}
+xgb_grid <- expand.grid(
+  nrounds = c(50, 100),  # 减少轮数
+  max_depth = c(3, 4),   # 降低深度
+  eta = c(0.05, 0.1),    # 降低学习率
+  gamma = c(0, 1, 2),    # 增加正则化
+  colsample_bytree = 0.7,
+  min_child_weight = c(5, 10),  # 增加最小权重
+  subsample = 0.7
+)
+
+set.seed(123)
+xgb_model_v2 <- train(
+  x = X_train, 
+  y = y_train,
+  method = "xgbTree",
+  metric = "ROC",
+  tuneGrid = xgb_grid,  # 现在xgb_grid已定义
+  trControl = cv_ctrl,
+  verbose = FALSE
+)
+
+print(xgb_model_v2$bestTune)
+cat("XGBoost CV AUC:", max(xgb_model_v2$results$ROC), "\n")
+```
+
+# 重训练 & 验证 
+
+```{r}
+# 11. 验证集评估
+# =====================================
+
+# 11.1 随机森林验证（修正版）
+best_rf <- rf_model_v2$bestTune
+train_rf_df <- data.frame(X_train, Risk = y_train)
+
+set.seed(123)
+rf_fit_v2 <- ranger(
+  formula = Risk ~ .,
+  data = train_rf_df,
+  num.trees = 500,
+  mtry = best_rf$mtry,
+  splitrule = best_rf$splitrule,
+  min.node.size = best_rf$min.node.size,
+  probability = TRUE,
+  importance = "impurity"
+)
+
+# 修正：将X_valid转换为data.frame
+valid_rf_df <- data.frame(X_valid)  # 转换为data.frame
+valid_rf_probs <- predict(rf_fit_v2, data = valid_rf_df)$predictions[, "bad"]
+
+y_valid_num <- as.numeric(y_valid) - 1
+auc_rf_v2 <- roc(response = y_valid_num, predictor = valid_rf_probs)$auc
+cat("Random Forest 验证集 AUC (v2):", round(auc_rf_v2, 4), "\n")
+
+# 混淆矩阵
+valid_pred_rf <- ifelse(valid_rf_probs > 0.5, "bad", "good")
+valid_pred_rf <- factor(valid_pred_rf, levels = c("good","bad"))
+cm_rf_v2 <- confusionMatrix(valid_pred_rf, y_valid, positive = "bad")
+print(cm_rf_v2)
+
+# 11.2 XGBoost验证
+best_xgb <- xgb_model_v2$bestTune
+x_train_mat <- as.matrix(X_train)
+x_valid_mat <- as.matrix(X_valid)
+y_train_num <- as.numeric(y_train) - 1
+
+dtrain <- xgb.DMatrix(data = x_train_mat, label = y_train_num)
+dvalid <- xgb.DMatrix(data = x_valid_mat, label = y_valid_num)
+
+xgb_params <- list(
+  objective = "binary:logistic",
+  eval_metric = "auc",
+  max_depth = best_xgb$max_depth,
+  eta = best_xgb$eta,
+  gamma = best_xgb$gamma,
+  colsample_bytree = best_xgb$colsample_bytree,
+  min_child_weight = best_xgb$min_child_weight,
+  subsample = best_xgb$subsample
+)
+
+set.seed(123)
+xgb_fit_v2 <- xgb.train(
+  params = xgb_params,
+  data = dtrain,
+  nrounds = best_xgb$nrounds,
+  watchlist = list(train = dtrain, valid = dvalid),
+  early_stopping_rounds = 20,
+  verbose = 0
+)
+
+valid_xgb_probs <- predict(xgb_fit_v2, x_valid_mat)
+auc_xgb_v2 <- roc(response = y_valid_num, predictor = valid_xgb_probs)$auc
+cat("XGBoost 验证集 AUC (v2):", round(auc_xgb_v2, 4), "\n")
+
+# 11.3 ElasticNet验证
+best_lr <- lr_model_v2$bestTune
+set.seed(123)
+enet_fit_v2 <- glmnet(
+  x = x_train_mat,
+  y = y_train_num,
+  family = "binomial",
+  alpha = best_lr$alpha,
+  lambda = best_lr$lambda
+)
+
+valid_lr_probs <- predict(enet_fit_v2, newx = x_valid_mat, type = "response")[,1]
+auc_lr_v2 <- roc(response = y_valid_num, predictor = valid_lr_probs)$auc
+cat("ElasticNet 验证集 AUC (v2):", round(auc_lr_v2, 4), "\n")
+
+# 11.4 总结对比
+cat("\n=== AUC对比总结 ===\n")
+cat("模型              原版本    新版本\n")
+cat("Random Forest:    0.9431   ", round(auc_rf_v2, 4), "\n")
+cat("XGBoost:          0.9190   ", round(auc_xgb_v2, 4), "\n")
+cat("ElasticNet:       0.7611   ", round(auc_lr_v2, 4), "\n")
+```
+
+
+```{r}
+# 12. 在全量数据上训练最终模型
+# =====================================
+
+# 使用全部训练数据
+X_all <- train_dummy %>% select(-ID, -Risk)
+y_all <- train_dummy$Risk
+
+# 12.1 全量随机森林
+train_all_df <- data.frame(X_all, Risk = y_all)
+
+set.seed(123)
+rf_final_v2 <- ranger(
+  formula = Risk ~ .,
+  data = train_all_df,
+  num.trees = 500,
+  mtry = best_rf$mtry,
+  splitrule = best_rf$splitrule,
+  min.node.size = best_rf$min.node.size,
+  probability = TRUE,
+  importance = "impurity"
+)
+
+# 12.2 全量XGBoost
+x_all_mat <- as.matrix(X_all)
+y_all_num <- as.numeric(y_all) - 1
+dall <- xgb.DMatrix(data = x_all_mat, label = y_all_num)
+
+set.seed(123)
+xgb_final_v2 <- xgb.train(
+  params = xgb_params,
+  data = dall,
+  nrounds = best_xgb$nrounds,
+  verbose = 0
+)
+
+# 13. 在72条公共测试集上测试
+# =====================================
+
+# 读取公共测试集标签
+public_labels <- read.csv(
+  "C:/Users/Jinxi Zhang/Desktop/project/kaggle_sample_solution_file.csv",
+  stringsAsFactors = FALSE
+)
+
+# 获取公共测试集数据
+public_test <- test_dummy %>%
+  inner_join(public_labels, by = "ID") %>%
+  mutate(Risk = factor(Risk, levels = c("good", "bad")))
+
+# 移除Usage列（如果存在）
+if("Usage" %in% names(public_test)) {
+  public_test <- public_test %>% select(-Usage)
+}
+
+X_public <- public_test %>% select(-ID, -Risk)
+y_public <- public_test$Risk
+
+# 13.1 Random Forest预测
+public_rf_df <- data.frame(X_public)
+public_rf_probs_v2 <- predict(rf_final_v2, data = public_rf_df)$predictions[, "bad"]
+
+# 计算AUC
+y_public_num <- as.numeric(y_public) - 1
+auc_public_rf_v2 <- roc(response = y_public_num, predictor = public_rf_probs_v2)$auc
+cat("\n=== Random Forest 公共测试集AUC ===\n")
+cat("原版本: 0.4648\n")
+cat("新版本:", round(auc_public_rf_v2, 4), "\n")
+
+# 13.2 XGBoost预测
+x_public_mat <- as.matrix(X_public)
+public_xgb_probs_v2 <- predict(xgb_final_v2, x_public_mat)
+auc_public_xgb_v2 <- roc(response = y_public_num, predictor = public_xgb_probs_v2)$auc
+cat("\n=== XGBoost 公共测试集AUC ===\n")
+cat("新版本:", round(auc_public_xgb_v2, 4), "\n")
+
+# 13.3 集成预测
+ensemble_probs <- 0.5 * public_rf_probs_v2 + 0.5 * public_xgb_probs_v2
+auc_ensemble <- roc(response = y_public_num, predictor = ensemble_probs)$auc
+cat("\n=== 集成模型 公共测试集AUC ===\n")
+cat("RF+XGB集成:", round(auc_ensemble, 4), "\n")
+```
+

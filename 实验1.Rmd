@@ -1,0 +1,617 @@
+---
+title: "scratch 2"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document: default
+date: "2025-05-29"
+---
+
+# Introduction
+```{r}
+train <- read.csv("C:/Users/Jinxi Zhang/Desktop/project/training_data.csv", stringsAsFactors=FALSE)
+test  <- read.csv("C:/Users/Jinxi Zhang/Desktop/project/test_data.csv",  stringsAsFactors=FALSE)
+
+dim(train)  # 1120 × 11
+dim(test)   #  280 × 10
+
+sapply(train, function(x) sum(is.na(x)))
+
+# Check ranges
+summary(train$Age)                              # look for negative/odd ages
+
+```
+
+
+# EDA
+The histogram gets us a quick picture of how applicants' ages are spread -- are most between 20-30, 40-50. is there a tail of very young or very old borrowers? These questions matter for credit risk prediction because age often correlates with experience, income stability, or risk appetite. If there is a cluster of defaults among very young(<25) applicants, that would be an important observation to make.  
+
+In the histogram, we observed that there is a bulk of loans that sits in the $1000-$4000, but there is a long tail stretching past $15000.This could suggests that log transformation on credit.amount or something similar could be feasible so that the differences among the smaller, more common loans are not washed out by extreme values.
+
+In the boxplot, we observed that "bad" borrowers have a median loan of around $3000. "Good" borrowers have a median loan of around $2500. The IQR for bad loans is shifted upward and is wider, meaning not only are bad borrowers taking larger loans on average, but their loan sizes vary more. So from here, we can already see that loan size clearly differentiates risk: a borrower is more likely to fail to repay their loan if the loan amount is large. Hence, this should be something to pay attention to while constructing the model.
+```{r}
+## univariate
+library(ggplot2)
+
+# Histogram of CreditAmount
+ggplot(train, aes(Credit.amount)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "white") +
+  theme_minimal() +
+  labs(title = "Distribution of Loan Amounts", x = "Credit Amount", y = "Count")
+
+# Boxplot of CreditAmount by Risk
+ggplot(train, aes(x = Risk, y = Credit.amount, fill = Risk)) +
+  geom_boxplot(alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Loan Amounts by Risk Category", x = "Risk", y = "Credit Amount")
+              
+                   
+```
+In this subsection, we investigate pairs of variables to see how they relate. Once we have inspected each variable on its own, the next step is bivariate exploration which means that we pair each predictor with our target (Risk) to seee which features truly move the needle on default probability. The goals of this subsection has three purposes: 
+1) find which variables differ meaningfully between "good" and "bad" loans. 
+2) Decide on transformations on observede patterns if needed
+3) choosee appropriate algorithms 
+
+The first purpose will be achieved via using class balance. It is essentially a simple bar chart of how many loans are labeled "good" vs. "bad." We saw from the histogram that there are 560 "bad" loans and 560 "good" loans, which we considered perfectly balanced thus not needing to perform class weights or threshold adjustments. 
+
+The second purpose will be achieved via exploring the numeric features by risk which includes Age, Duration(Months), and Credit.amount. If "bad" loans have a higher median (credit.amount) or longer Duration, that variable is a likely candidate for prediction. In our results, we see that the for Age, bad loans have a mean of 33.85 years while good loans have a mean of 36.5 years with a p-value of 0.0001. This suggests that good borrowers are on average about 2.6 years older-a small but statistically significant difference. To be more specific, age conveys some risk signal which suggests it can be included in the model.
+
+For Duration, bad loans have a mean of 25.02 months and good loans have a mean of 18.90 months with a p-value of 2.2e-16. This suggests that defaulting borrowers take substantially longer loans which is about 6 months more on average. Both are statistically significant. Putting it into context, longer duration loans carry more uncertainty over time, so this variable will be included in the model.
+
+For Credit.amount, bad loans have a mean of 3905.93 dollars and good loans have a mean of 2931.17 dollars. This suggests that bad borrowers take out about 1000 dollars larger loans on average which is a clear effect. Thus, we see that loan size is a strong predictor of default.
+
+Now, we move on to examining categorical features vs. Risk. We will achieve comparing categorical variables using Pearson's chi-squared test/Fisher's Exact test. Pearson's chi-squared test compares the observed counts in each cell of a contingency table (e.g. number of renters who default vs. don't) to the expectede counts if the two variables were completely unrelated. The results for the chi-squared tests for each is displayed below:
+
+Sex has a p-value of 0.0043 which means it is statistically significant. This suggests that females are under-represented among bad loans so sex carries signal.
+
+Job has a p-value of 0.6512 which means it is not statistically significant. This means that there are no meaningful difference. We could considered dropping it from the model.
+
+Housing has a p-calue of 4.68e-09 which means that it is statistically significant. This suggests that Housing is statistically significant. It means that renters and "freee" lots are over-represented among bad borrowers.
+
+Saving.accounts has a p-value of 6.33e-10 which means it is statistically significant. It means that poorer savings correlate strongly with default risk.
+
+checking.account has a p-value of <2.2e-16 which means it is statistically significant. It measn that checking balance level is highly predictive of default.
+
+Purpose has a p-value of 0.0045 which is statistically significant. It means that certain purposes(e.g. education, funiture) skew toward one risk group
+
+So, we keep Sex, Housing, saving.accounts, checking account, purpose.
+
+
+```{r}
+## bivariate(risk)
+# Bar chart of class balance
+library(ggplot2)
+ggplot(train, aes(Risk)) +
+  geom_bar(fill = "steelblue") +
+  theme_minimal() +
+  labs(title = "Count of Good vs. Bad Loans", x = "Risk", y = "Count")                          
+
+# 2. Numeric vs. Risk: Age, Duration, Credit.amount
+for (v in c("Age", "Duration", "Credit.amount")) {
+  p <- ggplot(train, aes_string(x = "Risk", y = v, fill = "Risk")) +
+    geom_boxplot(alpha = 0.7) +
+    theme_minimal() +
+    labs(title = paste(v, "by Risk"), x = "Risk", y = v)
+  print(p)
+  
+  # t-test to check if means differ significantly
+  tt <- t.test(as.formula(paste(v, "~ Risk")), data = train)
+  print(tt)
+}
+
+# 3. Categorical vs. Risk: Sex, Job, Housing, Saving.accounts, Checking.account, Purpose
+for (v in c("Sex", "Job", "Housing", "Saving.accounts", "Checking.account", "Purpose")) {
+  tbl <- table(train[[v]], train$Risk, useNA = "ifany")
+  cat("\n\nVariable:", v, "\n")
+  print(tbl)
+  
+  # Use χ² when all expected counts ≥ 5; otherwise Fisher’s exact
+  chi <- chisq.test(tbl)
+  if (all(chi$expected >= 5)) {
+    print(chi)
+  } else {
+    print(fisher.test(tbl))
+  }
+}
+```
+
+In the above section, we discussed how each feature's relationship with the target (Risk). In this section we construct a correlation plot that measures how the numeric features re
+```{r}
+## correlation & multivariate
+library(corrplot)
+library(dplyr)
+num_vars <- train %>% select(Age, Duration, Credit.amount)
+M <- cor(num_vars)
+corrplot(M, method="ellipse")                                          
+
+```
+# checking skewness
+```{r check-skewness, fig.keep='all', fig.show='hold'}
+library(ggplot2)
+
+# Define the numeric columns
+nums <- c("Age", "Duration", "Credit.amount")
+
+for (v in nums) {
+  # Histogram + density
+  p <- ggplot(train, aes_string(x = v)) +
+       geom_histogram(aes(y = ..density..), bins = 30,
+                      fill = "steelblue", color = "white") +
+       geom_density(color = "darkred", size = 1) +
+       theme_minimal() +
+       labs(title = paste("Histogram + Density:", v),
+            x = v, y = "Density")
+  print(p)                     # force ggplot to render
+  
+  # Q–Q plot
+  print(                      # wrap in print() just to be safe
+    {
+      qqnorm(train[[v]], main = paste("Q–Q Plot:", v))
+      qqline(train[[v]], col = "red", lwd = 2)
+    }
+  )
+}
+```
+
+# Preprocessing
+```{r}
+
+# 1. Fix missing values in categorical variables
+cat("Checking for empty strings in categorical variables...\n")
+cat("Empty Saving.accounts:", sum(train$Saving.accounts == ""), "\n")
+cat("Empty Checking.account:", sum(train$Checking.account == ""), "\n")
+
+# Replace empty strings with "unknown"
+train$Saving.accounts[train$Saving.accounts == ""] <- "unknown"
+train$Checking.account[train$Checking.account == ""] <- "unknown"
+test$Saving.accounts[test$Saving.accounts == ""] <- "unknown"
+test$Checking.account[test$Checking.account == ""] <- "unknown"
+
+# 2. Check and fix data consistency
+# Trim whitespace and standardize case for categorical variables
+train$Sex <- trimws(train$Sex)
+train$Housing <- trimws(train$Housing)
+train$Purpose <- trimws(train$Purpose)
+test$Sex <- trimws(test$Sex)
+test$Housing <- trimws(test$Housing)
+test$Purpose <- trimws(test$Purpose)
+
+# 3. Handle outliers (optional - only if you want to cap extreme values)
+# Check for extreme outliers first
+Q1 <- quantile(train$Credit.amount, 0.25)
+Q3 <- quantile(train$Credit.amount, 0.75)
+IQR <- Q3 - Q1
+extreme_threshold <- Q3 + 3 * IQR
+cat("Credit amounts above", extreme_threshold, "will be capped\n")
+cat("Number of extreme outliers:", sum(train$Credit.amount > extreme_threshold), "\n")
+
+
+train$Credit.amount[train$Credit.amount > extreme_threshold] <- extreme_threshold
+test$Credit.amount[test$Credit.amount > extreme_threshold] <- extreme_threshold
+
+# 4. Combine rare categories
+purpose_counts <- table(train$Purpose)
+rare_purposes <- names(purpose_counts[purpose_counts < 20])
+cat("Rare purpose categories:", rare_purposes, "\n")
+train$Purpose[train$Purpose %in% rare_purposes] <- "other"
+test$Purpose[test$Purpose %in% rare_purposes] <- "other"
+
+# 5. Create derived features based on EDA insights
+train$LoanRiskScore <- ifelse(
+  train$Duration > 24 & 
+  train$Credit.amount > 3500 & 
+  train$Checking.account %in% c("unknown", "little"),
+  1, 0
+)
+test$LoanRiskScore <- ifelse(
+  test$Duration > 24 & 
+  test$Credit.amount > 3500 & 
+  test$Checking.account %in% c("unknown", "little"),
+  1, 0
+)
+
+cat("\nData cleaning completed!\n")
+
+# NOW CONTINUE WITH YOUR EDA SECTION...
+# EDA
+# The histogram gets us a quick picture...
+# UNIFIED CREDIT RISK MODELING APPROACH
+# Goal: Predict good vs bad credit risks with consistent, explainable methods
+
+library(dplyr)
+library(caret)
+library(ranger)
+library(pROC)
+
+
+# =============================================================================
+# STEP 1: PREPROCESSING FUNCTION (Same for all data)
+# =============================================================================
+
+preprocess_credit_data <- function(train, is_training = TRUE, scaling_params = NULL) {
+  # 1. Create log-transformed features for skewed numeric variables
+  processed_data <- train %>%
+    mutate(
+      LogCreditAmt = log1p(Credit.amount),
+      LogDuration = log1p(Duration),
+      LoanRiskScore = LoanRiskScore  # Include the new feature
+    )
+  
+  # 2. Convert categorical variables to factors
+  # WHY: R needs factors for proper dummy variable creation
+  processed_data <- processed_data %>%
+    mutate(across(
+      c(Sex, Housing, Saving.accounts, Checking.account, Purpose),
+      factor
+    ))
+  
+  # 3. Create dummy variables (one-hot encoding)
+  # WHY: Most ML algorithms need numeric inputs
+  processed_data <- processed_data %>%
+    fastDummies::dummy_cols(
+      select_columns = c("Sex", "Housing", "Saving.accounts", 
+                        "Checking.account", "Purpose"),
+      remove_first_dummy = TRUE,        # Avoid multicollinearity
+      remove_selected_columns = TRUE
+    )
+  
+  # 4. Select final features
+  feature_cols <- c("Age", "LogCreditAmt", "LogDuration", "LoanRiskScore",
+                    names(processed_data)[grepl("^(Sex_|Housing_|Saving\\.accounts_|Checking\\.account_|Purpose_)", 
+                                                names(processed_data))])
+  if("Risk" %in% names(processed_data)) {
+    processed_data <- processed_data %>% select(all_of(feature_cols), Risk)
+  } else {
+    processed_data <- processed_data %>% select(all_of(feature_cols))
+  }
+  
+  # 5. Scale numeric features
+  # WHY: Different scales can bias algorithms like logistic regression
+  numeric_cols <- c("Age", "LogCreditAmt", "LogDuration")
+  
+  if(is_training) {
+    # For training: calculate scaling parameters
+    scaling_params <- list()
+    for(col in numeric_cols) {
+      scaling_params[[col]] <- list(
+        mean = mean(processed_data[[col]], na.rm = TRUE),
+        sd = sd(processed_data[[col]], na.rm = TRUE)
+      )
+      # Apply scaling
+      processed_data[[col]] <- scale(processed_data[[col]])[,1]
+    }
+    attr(processed_data, "scaling_params") <- scaling_params
+    
+  } else {
+    # For testing: use training scaling parameters
+    if(is.null(scaling_params)) stop("Need scaling parameters for test data")
+    for(col in numeric_cols) {
+      processed_data[[col]] <- (processed_data[[col]] - scaling_params[[col]]$mean) / 
+                               scaling_params[[col]]$sd
+    }
+  }
+  
+  # 6. Prepare target variable if present
+  if("Risk" %in% names(processed_data)) {
+    processed_data <- processed_data %>%
+      mutate(Risk = factor(Risk, levels = c("bad", "good")))
+  }
+  
+  return(processed_data)
+}
+
+# =============================================================================
+# STEP 2: APPLY PREPROCESSING TO TRAINING DATA
+# =============================================================================
+
+# Preprocess training data
+train_processed <- preprocess_credit_data(train, is_training = TRUE)
+scaling_params <- attr(train_processed, "scaling_params")
+
+cat("Training data processed. Shape:", dim(train_processed), "\n")
+cat("Features:", setdiff(names(train_processed), "Risk"), "\n\n")
+
+# =============================================================================
+# STEP 3: MODEL DEVELOPMENT AND VALIDATION
+# =============================================================================
+
+set.seed(42)
+
+# Split training data for validation (80/20)
+# WHY: Need to test model performance before final predictions
+train_idx <- createDataPartition(train_processed$Risk, p = 0.8, list = FALSE)
+tr_data   <- train_processed[train_idx, ]
+val_data  <- train_processed[-train_idx, ]
+
+# Set up cross-validation
+# WHY: Cross-validation gives more robust performance estimates
+ctrl <- trainControl(
+  method = "cv",
+  number = 5,
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE,
+  savePredictions = "final"
+)
+
+# Model 1: Logistic Regression
+# WHY: Interpretable baseline, good for understanding feature importance
+cat("Training Logistic Regression...\n")
+set.seed(42)
+log_mod <- train(
+  Risk ~ .,
+  data = tr_data,
+  method = "glm",
+  family = binomial,
+  metric = "ROC",
+  trControl = ctrl
+)
+
+# Model 2: Random Forest
+# WHY: Handles non-linear relationships, feature interactions automatically
+cat("Training Random Forest...\n")
+set.seed(42)
+rf_mod <- train(
+  Risk ~ .,
+  data = tr_data,
+  method = "ranger",
+  metric = "ROC",
+  tuneLength = 5,
+  trControl = ctrl
+)
+
+# =============================================================================
+# STEP 4: MODEL COMPARISON ON VALIDATION SET
+# =============================================================================
+
+# Predict on validation set
+val_pred_log <- predict(log_mod, val_data, type = "prob")[, "bad"]
+val_pred_rf  <- predict(rf_mod, val_data, type = "prob")[, "bad"]
+
+# Calculate performance metrics
+auc_log <- roc(val_data$Risk, val_pred_log)$auc
+auc_rf  <- roc(val_data$Risk, val_pred_rf)$auc
+
+# Class predictions at 0.5 threshold
+class_pred_log <- factor(ifelse(val_pred_log > 0.5, "bad", "good"), levels = c("bad", "good"))
+class_pred_rf  <- factor(ifelse(val_pred_rf > 0.5, "bad", "good"), levels = c("bad", "good"))
+
+cm_log <- confusionMatrix(class_pred_log, val_data$Risk, positive = "bad")
+cm_rf  <- confusionMatrix(class_pred_rf, val_data$Risk, positive = "bad")
+
+# Results summary
+results_summary <- tibble(
+  Model = c("Logistic Regression", "Random Forest"),
+  AUC = c(auc_log, auc_rf),
+  Sensitivity = c(cm_log$byClass["Sensitivity"], cm_rf$byClass["Sensitivity"]),
+  Specificity = c(cm_log$byClass["Specificity"], cm_rf$byClass["Specificity"]),
+  F1 = c(cm_log$byClass["F1"], cm_rf$byClass["F1"])
+)
+
+cat("\n=== MODEL COMPARISON RESULTS ===\n")
+print(results_summary)
+
+# Choose best model (you can change this logic)
+best_model <- if(auc_rf > auc_log) rf_mod else log_mod
+best_model_name <- if(auc_rf > auc_log) "Random Forest" else "Logistic Regression"
+
+cat("\nBest model:", best_model_name, "\n")
+
+# =============================================================================
+# STEP 5: FINAL MODEL TRAINING ON ALL TRAINING DATA
+# =============================================================================
+
+cat("\nRetraining best model on full training dataset WITH SMOTE...\n")
+
+# Use the SAME control with SMOTE for final model
+ctrl_final <- trainControl(
+  method = "cv",
+  number = 3,  # Fewer folds for final training
+  summaryFunction = twoClassSummary,
+  classProbs = TRUE,
+  sampling = "smote"  # CRITICAL: Include SMOTE here too
+)
+
+set.seed(42)
+final_model <- train(
+  Risk ~ .,
+  data = train_processed,
+  method = best_model$method,
+  tuneGrid = data.frame(best_model$bestTune),
+  trControl = ctrl_final  # Use SMOTE control instead of "none"
+)
+
+cat("Final model training complete with SMOTE\n")
+# =============================================================================
+# STEP 6: FINAL PREDICTIONS ON TEST DATA
+# =============================================================================
+
+cat("Processing test data and making final predictions...\n")
+
+# Preprocess test data using SAME scaling parameters as training
+test_processed <- preprocess_credit_data(test, is_training = FALSE, scaling_params = scaling_params)
+
+# Make predictions with error handling
+final_predictions <- predict(final_model, test_processed)
+
+# Initialize probability variables
+prob_bad <- NULL
+prob_good <- NULL
+
+# Try to get probabilities with error handling
+tryCatch({
+  final_probabilities <- predict(final_model, test_processed, type = "prob")
+  
+  # Check what columns are available
+  if("bad" %in% names(final_probabilities)) {
+    prob_bad <<- final_probabilities$bad
+    prob_good <<- final_probabilities$good
+  } else if("good" %in% names(final_probabilities)) {
+    prob_good <<- final_probabilities$good
+    prob_bad <<- 1 - prob_good
+  } else {
+    # Use first two columns if column names don't match
+    prob_bad <<- final_probabilities[, 1]
+    prob_good <<- final_probabilities[, 2]
+  }
+  
+  cat("Probability prediction successful\n")
+  
+}, error = function(e) {
+  cat("Probability prediction failed, using class predictions only\n")
+  prob_bad <<- ifelse(final_predictions == "bad", 1, 0)
+  prob_good <<- ifelse(final_predictions == "good", 1, 0)
+})
+
+# Create results dataframe
+final_results <- data.frame(
+    ID = test$ID,  # Use the ORIGINAL IDs from test data
+    Predicted_Risk = final_predictions,
+    Probability_Bad = prob_bad,
+    Probability_Good = prob_good
+)
+
+cat("\n=== FINAL PREDICTIONS SUMMARY ===\n")
+cat("Total predictions:", nrow(final_results), "\n")
+cat("Predicted 'bad' risks:", sum(final_predictions == "bad"), "\n")
+cat("Predicted 'good' risks:", sum(final_predictions == "good"), "\n")
+
+cat("\nFirst 10 predictions:\n")
+print(head(final_results, 10))
+
+cat("\n=== PROJECT COMPLETE ===\n")
+cat("Model used:", best_model_name, "\n")
+cat("Consistent preprocessing applied throughout\n")
+cat("Ready for interpretation and reporting\n")
+```
+```{r}
+# FINAL MODEL PERFORMANCE EVALUATION
+# Now we can see how well our model actually performed!
+
+library(dplyr)
+library(caret)
+library(pROC)
+
+# Read the answer key
+true_labels <- read.csv("C:/Users/Jinxi Zhang/Desktop/project/kaggle_sample_solution_file.csv")
+
+# Check the structure
+head(true_labels)
+cat("Answer key contains", nrow(true_labels), "entries\n")
+
+# Make sure the Risk column has the same factor levels as our model
+true_labels$Risk <- factor(true_labels$Risk, levels = c("bad", "good"))
+
+# Assuming your final_results dataframe from the previous code has:
+# - ID: row identifier
+# - Predicted_Risk: your model's predictions
+# - Probability_Bad: probability of bad credit
+
+# Check dimensions
+cat("Final results rows:", nrow(final_results), "\n")
+cat("True labels rows:", nrow(true_labels), "\n")
+cat("True labels ID range:", min(true_labels$ID), "to", max(true_labels$ID), "\n\n")
+
+# The answer key only contains a subset of test cases
+# We need to match by the ID column from the answer key
+
+evaluation_data <- true_labels %>%
+  left_join(final_results, by = "ID") %>%
+  filter(!is.na(Predicted_Risk)) %>%  # Keep only cases where we have predictions
+  select(ID, Risk, Predicted_Risk, Probability_Bad) %>%
+  rename(True_Risk = Risk)
+
+# Remove any rows where we don't have true labels
+evaluation_data <- evaluation_data %>% 
+  filter(!is.na(True_Risk))
+
+cat("Evaluation dataset contains", nrow(evaluation_data), "cases\n\n")
+
+# =============================================================================
+# PERFORMANCE METRICS
+# =============================================================================
+
+# 1. ACCURACY
+accuracy <- mean(evaluation_data$True_Risk == evaluation_data$Predicted_Risk)
+cat("=== OVERALL PERFORMANCE ===\n")
+cat("Accuracy:", round(accuracy * 100, 1), "%\n")
+
+# 2. CONFUSION MATRIX
+cm <- confusionMatrix(
+  evaluation_data$Predicted_Risk, 
+  evaluation_data$True_Risk, 
+  positive = "bad"
+)
+
+print(cm)
+
+# 3. AUC (if probabilities are available)
+if(!all(evaluation_data$Probability_Bad %in% c(0, 1))) {
+  auc_score <- roc(evaluation_data$True_Risk, evaluation_data$Probability_Bad)$auc
+  cat("\n=== AUC SCORE ===\n")
+  cat("AUC:", round(auc_score, 3), "\n")
+  
+  # Plot ROC curve
+  roc_obj <- roc(evaluation_data$True_Risk, evaluation_data$Probability_Bad)
+  plot(roc_obj, main = paste("ROC Curve (AUC =", round(auc_score, 3), ")"))
+}
+
+# 4. DETAILED BREAKDOWN
+cat("\n=== DETAILED BREAKDOWN ===\n")
+cat("Total test cases:", nrow(evaluation_data), "\n")
+cat("Correctly predicted 'bad' risks:", 
+    sum(evaluation_data$True_Risk == "bad" & evaluation_data$Predicted_Risk == "bad"), 
+    "out of", sum(evaluation_data$True_Risk == "bad"), "\n")
+cat("Correctly predicted 'good' risks:", 
+    sum(evaluation_data$True_Risk == "good" & evaluation_data$Predicted_Risk == "good"), 
+    "out of", sum(evaluation_data$True_Risk == "good"), "\n")
+
+# 5. BUSINESS INTERPRETATION
+sensitivity <- cm$byClass["Sensitivity"]  # True Positive Rate
+specificity <- cm$byClass["Specificity"]  # True Negative Rate
+
+cat("\n=== BUSINESS INTERPRETATION ===\n")
+cat("Sensitivity (recall for 'bad' risks):", round(sensitivity * 100, 1), "%\n")
+cat("- This means we correctly identified", round(sensitivity * 100, 1), "% of truly bad credit risks\n")
+cat("Specificity (recall for 'good' risks):", round(specificity * 100, 1), "%\n")
+cat("- This means we correctly identified", round(specificity * 100, 1), "% of truly good credit risks\n")
+
+# 6. SAMPLE OF CORRECT/INCORRECT PREDICTIONS
+cat("\n=== SAMPLE PREDICTIONS ===\n")
+cat("First 10 predictions vs actual:\n")
+sample_results <- evaluation_data %>%
+  select(ID, True_Risk, Predicted_Risk, Probability_Bad) %>%
+  mutate(
+    Correct = True_Risk == Predicted_Risk,
+    Probability_Bad = round(Probability_Bad, 3)
+  ) %>%
+  head(10)
+
+print(sample_results)
+
+# 7. SUMMARY STATISTICS
+correct_predictions <- sum(evaluation_data$True_Risk == evaluation_data$Predicted_Risk)
+total_predictions <- nrow(evaluation_data)
+
+cat("\n=== FINAL SUMMARY ===\n")
+cat("Model:", best_model_name, "\n")
+cat("Correct predictions:", correct_predictions, "out of", total_predictions, "\n")
+cat("Final accuracy:", round(accuracy * 100, 1), "%\n")
+
+# Determine if the model performed well
+if(accuracy > 0.8) {
+  cat("🎉 Excellent performance! Your model is doing very well.\n")
+} else if(accuracy > 0.7) {
+  cat("✅ Good performance! Your model is reasonably accurate.\n")
+} else if(accuracy > 0.6) {
+  cat("⚠️  Moderate performance. There's room for improvement.\n")
+} else {
+  cat("❌ Low performance. Consider different features or algorithms.\n")
+}
+
+cat("\nFor a credit risk model, both sensitivity and specificity are important:\n")
+cat("- High sensitivity = catch most bad credit risks (reduce defaults)\n")
+cat("- High specificity = don't reject too many good customers (maintain business)\n")
+```
+
+
+
