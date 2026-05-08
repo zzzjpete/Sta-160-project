@@ -147,8 +147,4 @@ install.packages(c("ggplot2", "patchwork", "tidyverse", "fastDummies",
 
 ---
 
-## Team
-
-Jinxi Zhang · Xiangquan Zeng · Inesh Vytheswaran
-
 UC Davis — STA 160
